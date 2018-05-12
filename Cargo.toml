@@ -1,6 +1,6 @@
 [package]
 name = "defcon26-pow"
-version = "0.1.0"
+version = "0.1.1"
 description = "Same proof, less work"
 authors = ["kpcyrd <git@rxv.cc>"]
 license = "MIT"

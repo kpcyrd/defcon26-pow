@@ -9,11 +9,16 @@ extern crate num_bigint;
 extern crate num_traits;
 
 use std::env;
+use std::thread;
 use std::io::prelude::*;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use byteorder::{LittleEndian, WriteBytesExt};
 use sha2::{Sha256, Digest};
 use num_bigint::BigUint;
 use num_traits::Zero;
+
+const STEP: usize = 1000;
 
 
 #[inline]
@@ -34,17 +39,25 @@ fn check_pow(challenge: &str, n: u8, solution: u64) -> bool {
     (num % op).is_zero()
 }
 
-fn solve_pow(challenge: &str, n: u8) -> u64 {
-    let mut candidate = 0;
-
-    loop {
-        if check_pow(challenge, n, candidate) {
-            break;
+// TODO: AtomicU64 is not stable yet
+fn solve_pow(cursor: Arc<AtomicUsize>, solution: Arc<Mutex<Option<u64>>>, challenge: String, n: u8) {
+    while solution.lock().unwrap().is_none() {
+        let cur = cursor.fetch_add(STEP, Ordering::SeqCst);
+        for candidate in cur..(cur+STEP) {
+            let candidate = candidate as u64;
+            if check_pow(&challenge, n, candidate) {
+                let mut mtx = solution.lock().unwrap();
+                *mtx = Some(candidate);
+                break;
+            }
         }
-        candidate += 1;
     }
+}
 
-    candidate
+fn hexdump(bytes: &[u8]) -> String {
+    bytes.into_iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
 }
 
 fn main() {
@@ -54,9 +67,25 @@ fn main() {
     let n = n.parse::<u8>().expect("n is not u8");
     println!("Solving challenge: {:?}, n: {:?}", challenge, n);
 
-    let solution = solve_pow(&challenge, n);
+    let solution = Arc::new(Mutex::new(None));
+    let cursor = Arc::new(AtomicUsize::new(0));
 
-    println!("Solution: {:?} -> {:?}", solution, pow_hash(&challenge, solution));
+    let mut children = vec![];
+    for _ in 0..num_cpus::get() {
+        let cur = cursor.clone();
+        let sol = solution.clone();
+        let chall = challenge.to_string();
+        let child = thread::spawn(move || solve_pow(cur, sol, chall, n));
+        children.push(child);
+    }
+
+    children.into_iter()
+        .map(|c| c.join().unwrap())
+        .collect::<Vec<_>>();
+
+    // take solution
+    let solution = solution.lock().unwrap().unwrap();
+    println!("Solution: {:?} -> {:?}", solution, hexdump(&pow_hash(&challenge, solution)));
 }
 
 #[cfg(test)]
@@ -80,12 +109,7 @@ mod tests {
     #[test]
     fn test_pow_hash() {
         let hash = pow_hash("e2ZgIzlOpe", 52644528);
-
-        let hash = hash.into_iter()
-                        .map(|b| format!("{:02x}", b))
-                        .collect::<String>();
-
-        assert_eq!("a51496f8ce009bab48108eaaa085b749b39c8707ae622e8d446a5c9228000000", hash);
+        assert_eq!("a51496f8ce009bab48108eaaa085b749b39c8707ae622e8d446a5c9228000000", hexdump(&hash));
     }
 
     #[bench]
