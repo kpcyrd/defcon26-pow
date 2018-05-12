@@ -1,0 +1,18 @@
+[package]
+name = "defcon26-pow"
+version = "0.1.0"
+description = "Same proof, less work"
+authors = ["kpcyrd <git@rxv.cc>"]
+license = "MIT"
+repository = "https://github.com/kpcyrd/defcon26-pow"
+readme = "README.md"
+
+[features]
+nightly = []
+
+[dependencies]
+num_cpus = "1.8.0"
+sha2 = "0.7.1"
+byteorder = "1"
+num-bigint = "0.1"
+num-traits = "0.2"
