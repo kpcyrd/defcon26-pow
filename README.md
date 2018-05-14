@@ -2,6 +2,13 @@
 
 Same proof, less work.
 
+This pow solver has been used by krautstrike instead of the slow python script.
+A pow-as-a-service deployment has been provided by tu-berlin and @domenukk.
+
+Make sure you build a release binary with `cargo build --release`.
+
+[![screenshot](image.png)](image.png)
+
 ## Tests
 
 ```
