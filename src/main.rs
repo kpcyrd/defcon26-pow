@@ -7,26 +7,23 @@ extern crate sha2;
 extern crate byteorder;
 extern crate num_bigint;
 extern crate num_traits;
+extern crate rayon;
+
+use rayon::prelude::*;
 
 use std::env;
-use std::thread;
-use std::io::prelude::*;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use byteorder::{LittleEndian, WriteBytesExt};
 use sha2::{Sha256, Digest};
 use num_bigint::BigUint;
 use num_traits::Zero;
 
-const STEP: usize = 1000;
-
+const MAX_CANDIDATES: u64 = 100_000_000;
 
 #[inline]
 fn pow_hash(challenge: &str, solution: u64) -> Vec<u8> {
-    let mut wtr = vec![];
-    wtr.write(challenge.as_bytes()).unwrap();
+    let mut wtr = Vec::from(challenge);
     wtr.write_u64::<LittleEndian>(solution).unwrap();
-    Vec::from(Sha256::digest(&wtr).as_slice())
+    Sha256::digest(&wtr).to_vec()
 }
 
 #[inline]
@@ -34,23 +31,18 @@ fn check_pow(challenge: &str, n: u8, solution: u64) -> bool {
     let h = pow_hash(challenge, solution);
     let num = BigUint::from_bytes_be(&h);
 
-    let op = 2u64.pow(n as u32);
+    // 32 bit is sufficient, if we want to support max n = 30 next year
+    let op = 2u32.pow(u32::from(n));
 
     (num % op).is_zero()
 }
 
-// TODO: AtomicU64 is not stable yet
-fn solve_pow(cursor: Arc<AtomicUsize>, solution: Arc<Mutex<Option<u64>>>, challenge: String, n: u8) {
-    while solution.lock().unwrap().is_none() {
-        let cur = cursor.fetch_add(STEP, Ordering::SeqCst);
-        for candidate in cur..(cur+STEP) {
-            let candidate = candidate as u64;
-            if check_pow(&challenge, n, candidate) {
-                let mut mtx = solution.lock().unwrap();
-                *mtx = Some(candidate);
-                break;
-            }
-        }
+#[inline]
+fn solve_pow(candidate: u64, challenge: &str, n: u8) -> Option<u64> {
+    if check_pow(&challenge, n, candidate) {
+        Some(candidate)
+    } else {
+        None
     }
 }
 
@@ -67,25 +59,12 @@ fn main() {
     let n = n.parse::<u8>().expect("n is not u8");
     println!("Solving challenge: {:?}, n: {:?}", challenge, n);
 
-    let solution = Arc::new(Mutex::new(None));
-    let cursor = Arc::new(AtomicUsize::new(0));
-
-    let mut children = vec![];
-    for _ in 0..num_cpus::get() {
-        let cur = cursor.clone();
-        let sol = solution.clone();
-        let chall = challenge.to_string();
-        let child = thread::spawn(move || solve_pow(cur, sol, chall, n));
-        children.push(child);
-    }
-
-    children.into_iter()
-        .map(|c| c.join().unwrap())
-        .collect::<Vec<_>>();
+    let solution = (0..MAX_CANDIDATES).into_par_iter()
+                                      .map(|x| solve_pow(x, &challenge, n))
+                                      .find_any(|x| x.is_some());
 
     // take solution
-    let solution = solution.lock().unwrap().unwrap();
-    println!("Solution: {:?} -> {:?}", solution, hexdump(&pow_hash(&challenge, solution)));
+    println!("Solution: {:?} -> {:?}", solution, hexdump(&pow_hash(&challenge, solution.unwrap().unwrap())));
 }
 
 #[cfg(test)]
